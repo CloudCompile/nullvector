@@ -171,6 +171,14 @@ class NullVectorBot(commands.Bot):
             async with message.channel.typing():
                 response = await self.api.chat_completions(api_messages, model=use_model)
 
+                # Handle empty response
+                if not response or not response.strip():
+                    log.warning(f"Empty response from model {use_model}, retrying with openai-fast...")
+                    response = await self.api.chat_completions(api_messages, model="openai")
+                    if not response or not response.strip():
+                        await message.channel.send("Hmm, I got an empty response. Try again?")
+                        return
+
                 # Save to DB
                 self.db.add_conversation(channel_id, user_id, "user", content)
                 self.db.add_conversation(channel_id, user_id, "assistant", response, model_used=use_model)

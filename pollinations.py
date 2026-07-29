@@ -10,9 +10,12 @@ v2.0: Proper error handling, cost tracking, rate limiting awareness.
 from __future__ import annotations
 import aiohttp
 import json
+import logging
 from typing import Optional, List, Dict, Any
 
 from config import POLLINATIONS_KEY, POLLINATIONS_BASE_URL, POLLINATIONS_MEDIA_URL
+
+log = logging.getLogger("nullvector.pollinations")
 
 
 class PollinationsAPI:
@@ -56,12 +59,21 @@ class PollinationsAPI:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "stream": False,
         }
 
         async with session.post(url, headers=self._headers(), json=payload) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return data["choices"][0]["message"]["content"]
+                try:
+                    content = data["choices"][0]["message"]["content"]
+                    if not content:
+                        # Try reasoning_content fallback (some models put output there)
+                        content = data["choices"][0]["message"].get("reasoning_content", "") or ""
+                    return content or ""
+                except (KeyError, IndexError) as e:
+                    log.error(f"Unexpected API response format: {json.dumps(data)[:500]}")
+                    return ""
             else:
                 error_text = await resp.text()
                 raise Exception(f"API Error {resp.status}: {error_text[:300]}")
