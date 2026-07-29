@@ -275,18 +275,24 @@ def setup_lily():
     """Set up Lily v8.5."""
     log(f"{CYAN}═══ Setting up Lily v8.5 ═══{RESET}")
 
-    lily_dir = os.path.join(WORK_DIR, "Lily")
+    # The Lily repo has a nested structure: Lily/Lily/bot.py
+    repo_dir = os.path.join(WORK_DIR, "Lily")     # git clone target
+    lily_dir = os.path.join(repo_dir, "Lily")      # actual bot code
 
     # Clone or download
     if has_git():
-        clone_or_pull(LILY_REPO, lily_dir)
+        clone_or_pull(LILY_REPO, repo_dir)
     else:
         warn("git not found, downloading ZIP instead...")
-        download_zip(LILY_ZIP, lily_dir, "Lily")
+        download_zip(LILY_ZIP, repo_dir, "Lily")
 
     if not os.path.isdir(lily_dir):
-        error(f"Lily directory not found at {lily_dir} — something went wrong!")
-        sys.exit(1)
+        # Fallback: maybe the repo doesn't have the nested structure
+        if os.path.exists(os.path.join(repo_dir, "bot.py")):
+            lily_dir = repo_dir
+        else:
+            error(f"Lily bot directory not found at {lily_dir} — something went wrong!")
+            sys.exit(1)
 
     # Install dependencies
     install_deps(lily_dir)
