@@ -50,6 +50,8 @@ log = logging.getLogger("NullVector")
 # ── Bot setup ─────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True   # Privileged — required for reading messages
+intents.presences = True         # Privileged — required for custom status
+intents.members = True           # Privileged — required for member info
 intents.messages = True
 intents.guilds = True
 intents.dm_messages = True
