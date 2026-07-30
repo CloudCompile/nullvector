@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Image Generation Cog
+NullVector v3.0 — Image Generation Cog
 
 Image generation with cost-conscious model routing.
 Sana Sprint by default (dirt cheap!).

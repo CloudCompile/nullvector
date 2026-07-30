@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Core Cog
+NullVector v3.0 — Core Cog
 
 Essential commands: help, status, memory, models, ping.
 """
@@ -27,7 +27,7 @@ class CoreCog(commands.Cog, name="Core"):
     async def help_slash(self, interaction: discord.Interaction):
         """Show all available commands."""
         embed = discord.Embed(
-            title="NullVector v2.0 — Command Guide",
+            title="NullVector v3.0 — Command Guide",
             description="Smart AI assistant that automatically picks the best model for your query. Works in DMs and servers!",
             color=discord.Color.purple(),
         )
@@ -37,6 +37,7 @@ class CoreCog(commands.Cog, name="Core"):
             value=(
                 "`/ask <question>` — Ask anything\n"
                 "`/chat <message>` — Have a conversation\n"
+                "`/imagine <prompt>` — Creative text generation\n"
                 "`/research <topic>` — Web search research\n"
                 "`/code <prompt>` — Coding help"
             ),
@@ -62,7 +63,7 @@ class CoreCog(commands.Cog, name="Core"):
             inline=False,
         )
 
-        embed.set_footer(text="NullVector v2.0 | Smart Model Routing | Cost-Conscious AI")
+        embed.set_footer(text="NullVector v3.0 | Smart Model Routing | Cost-Conscious AI")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="ping", description="Check response time")

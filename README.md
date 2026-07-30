@@ -1,8 +1,8 @@
-# NullVector v2.0 — Smart AI Discord Bot
+# NullVector v3.0 — Smart AI Discord Bot
 
 Intelligent AI assistant that automatically picks the best model for your query. Works in DMs and servers.
 
-## What's New in v2.0
+## What's New in v3.0
 
 - **Persistent memory** — SQLite database instead of in-memory dict (survives restarts!)
 - **Slash commands** — `/ask`, `/chat`, `/research`, `/code`, `/image`, etc.

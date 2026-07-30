@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Configuration Module
+NullVector v3.0 — Configuration Module
 
 Loads settings from environment variables / .env file.
-v2.0: Cost-conscious model routing, rate limiting, SQLite persistence.
+v3.0: Cost-conscious model routing, rate limiting, SQLite persistence.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ ADMIN_IDS: list[int] = [
 # ── Bot behaviour ────────────────────────────────────────
 BOT_PREFIX: str = os.getenv("BOT_PREFIX", "!")
 
-# ── Default model selections (v2.0: cost-conscious) ─────
+# ── Default model selections (v3.0: cost-conscious) ─────
 DEFAULT_TEXT_MODEL: str = os.getenv("DEFAULT_TEXT_MODEL", "openai-fast")
 DEFAULT_IMAGE_MODEL: str = os.getenv("DEFAULT_IMAGE_MODEL", "sana")
 
@@ -44,6 +44,9 @@ MAX_MEMORY: int = int(os.getenv("MAX_MEMORY", "50"))
 # ── Rate limiting ────────────────────────────────────────
 RATE_LIMIT_HOURLY: int = int(os.getenv("RATE_LIMIT_HOURLY", "30"))
 RATE_LIMIT_DAILY: int = int(os.getenv("RATE_LIMIT_DAILY", "100"))
+
+# ── Bot-to-bot interaction ────────────────────────────────
+BOT_PARTNER_ID: int = int(os.getenv("BOT_PARTNER_ID", "0")) if os.getenv("BOT_PARTNER_ID", "").isdigit() else 0
 
 # ── Data paths ───────────────────────────────────────────
 DATA_DIR = Path("data")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Rate Limiter
+NullVector v3.0 — Rate Limiter
 
 Per-user rate limiting for API generations.
 """

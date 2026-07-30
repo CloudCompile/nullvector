@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Database Module
+NullVector v3.0 — Database Module
 
 SQLite database for persistent conversation memory, user settings,
-and generation tracking. v2.0: Replaces in-memory dict storage.
+and generation tracking. v3.0: Replaces in-memory dict storage.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from config import DB_PATH, DATA_DIR
 
 
 class Database:
-    """Thread-safe SQLite database for NullVector v2.0."""
+    """Thread-safe SQLite database for NullVector v3.0."""
 
     def __init__(self, db_path: Path = DB_PATH):
         DATA_DIR.mkdir(exist_ok=True)
@@ -85,6 +85,25 @@ class Database:
                 created_at  TEXT DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_ltm_channel ON ltm_summaries(channel_id);
+
+            -- Bot-to-bot interaction log (NullVector <-> Lily conversations)
+            CREATE TABLE IF NOT EXISTS bot_interactions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id     TEXT NOT NULL,
+                channel_id   TEXT NOT NULL,
+                speaker      TEXT NOT NULL DEFAULT 'nullvector',
+                partner_id   TEXT NOT NULL,
+                content      TEXT NOT NULL,
+                created_at   TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_bot_inter_guild
+                ON bot_interactions(guild_id, created_at);
+
+            -- Global settings (key-value store)
+            CREATE TABLE IF NOT EXISTS global_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
         conn.commit()
 
@@ -106,6 +125,19 @@ class Database:
         rows = conn.execute(
             "SELECT role, content, model_used, created_at FROM conversations WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
             (str(channel_id), limit)
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def get_conversations_cross_server(self, user_id: int, limit: int = 50) -> List[Dict]:
+        """Get recent conversation messages for a user across ALL channels (cross-server).
+
+        This is used for DM continuity — when a user DMs NullVector after talking
+        in a server, we pull their conversation history from everywhere.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT role, content, model_used, created_at FROM conversations WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (str(user_id), limit)
         ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
@@ -195,3 +227,89 @@ class Database:
             (str(user_id), value, value)
         )
         conn.commit()
+
+    # ── Global settings ──────────────────────────────────
+
+    def get_setting(self, key: str, default: str = None) -> Optional[str]:
+        """Get a global setting."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT value FROM global_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Set a global setting."""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO global_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()
+
+    # ── Bot-to-bot interaction log ────────────────────────
+
+    def log_bot_interaction(
+        self, guild_id: int, channel_id: int, speaker: str,
+        partner_id: int, content: str
+    ) -> None:
+        """Log a bot-to-bot conversation message."""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO bot_interactions (guild_id, channel_id, speaker, partner_id, content) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(guild_id), str(channel_id), speaker, str(partner_id), content),
+        )
+        conn.commit()
+
+    def get_recent_bot_interactions(
+        self, guild_id: int, partner_id: int, limit: int = 10
+    ) -> List[Dict]:
+        """Get recent bot-to-bot interactions for context."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT speaker, content, created_at FROM bot_interactions "
+            "WHERE guild_id = ? AND partner_id = ? ORDER BY id DESC LIMIT ?",
+            (str(guild_id), str(partner_id), limit),
+        ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def get_last_bot_interaction_time(self, partner_id: int) -> Optional[str]:
+        """Get the timestamp of the last bot-to-bot interaction."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT created_at FROM bot_interactions WHERE partner_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (str(partner_id),),
+        ).fetchone()
+        return row["created_at"] if row else None
+
+    # ── Stats for health dashboard ────────────────────────
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get database statistics for the health dashboard."""
+        conn = self._conn()
+        stats = {}
+
+        row = conn.execute("SELECT COUNT(*) as cnt FROM conversations").fetchone()
+        stats["total_conversations"] = row["cnt"] if row else 0
+
+        row = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM conversations").fetchone()
+        stats["total_users"] = row["cnt"] if row else 0
+
+        row = conn.execute("SELECT COUNT(*) as cnt FROM generation_log").fetchone()
+        stats["total_generations"] = row["cnt"] if row else 0
+
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM generation_log WHERE created_at >= date('now')"
+        ).fetchone()
+        stats["today_generations"] = row["cnt"] if row else 0
+
+        row = conn.execute("SELECT COUNT(*) as cnt FROM bot_interactions").fetchone()
+        stats["bot_interactions"] = row["cnt"] if row else 0
+
+        row = conn.execute("SELECT COALESCE(SUM(cost_pollen), 0) as total FROM generation_log").fetchone()
+        stats["total_pollen_spent"] = row["total"] if row else 0.0
+
+        return stats

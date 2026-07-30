@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — Smart AI Discord Bot
+NullVector v3.0 — Smart AI Discord Bot
 
 Powered by Pollinations API — Text & Image Generation.
 Intelligent model routing, persistent memory, rate limiting.
@@ -14,6 +14,7 @@ Features:
   - Rate limiting (cost-conscious, not unlimited)
   - Web search via Gemini Search
   - Code help via Claude Fast
+  - Bot-to-bot interaction (talks to Lily!)
 
 Run: python bot.py
 """
@@ -23,6 +24,7 @@ import asyncio
 import logging
 import sys
 import os
+import time
 
 import discord
 from discord.ext import commands, tasks
@@ -39,6 +41,7 @@ from database import Database
 from pollinations import PollinationsAPI
 from model_router import ModelRouter
 from rate_limiter import RateLimiter
+from utils import generate_with_retry, chunk_response
 
 # ── Logging ───────────────────────────────────────────────
 logging.basicConfig(
@@ -56,7 +59,7 @@ intents.dm_messages = True
 
 
 class NullVectorBot(commands.Bot):
-    """NullVector v2.0 Discord Bot."""
+    """NullVector v3.0 Discord Bot."""
 
     def __init__(self):
         super().__init__(
@@ -68,6 +71,7 @@ class NullVectorBot(commands.Bot):
         self.api = PollinationsAPI()
         self.model_router = ModelRouter()
         self.rate_limiter = RateLimiter(self.db)
+        self._start_time = time.time()
 
     async def setup_hook(self):
         """Load all cogs."""
@@ -76,6 +80,7 @@ class NullVectorBot(commands.Bot):
             "cogs.ai_chat",
             "cogs.image_gen",
             "cogs.admin",
+            "cogs.bot_interaction",
         ]
         for cog in cogs:
             try:
@@ -96,7 +101,7 @@ class NullVectorBot(commands.Bot):
         log.info(f"✅ {self.user} is online!")
         log.info(f"📊 Connected to {len(self.guilds)} servers")
         await self.change_presence(
-            activity=discord.Game(name="DM or @mention me | /help | v2.0")
+            activity=discord.Game(name="DM or @mention me | /help | v3.0")
         )
 
     async def on_message(self, message: discord.Message):
@@ -129,13 +134,16 @@ class NullVectorBot(commands.Bot):
             await message.channel.send(f"Slow down! {reason}")
             return
 
-        # Route to the best model
+        # Route to the best model using the unified model router
         use_model = self.model_router.route_text(content)
         channel_id = message.channel.id
         user_id = message.author.id
 
-        # Build context from database
-        history = self.db.get_conversations(channel_id, limit=8)
+        # Build context from database — cross-server for DMs
+        if is_dm:
+            history = self.db.get_conversations_cross_server(user_id, limit=8)
+        else:
+            history = self.db.get_conversations(channel_id, limit=8)
         ltm_summary = self.db.get_latest_ltm_summary(channel_id)
 
         # Build system prompt
@@ -169,33 +177,34 @@ class NullVectorBot(commands.Bot):
 
         try:
             async with message.channel.typing():
-                response = await self.api.chat_completions(api_messages, model=use_model)
+                # Use retry logic with fallback models
+                response = await generate_with_retry(
+                    self.api,
+                    api_messages,
+                    primary_model=use_model,
+                    max_tokens=500,
+                )
 
-                # Handle empty response
+                # Handle empty response after all retries
                 if not response or not response.strip():
-                    log.warning(f"Empty response from model {use_model}, retrying with openai-fast...")
-                    response = await self.api.chat_completions(api_messages, model="openai")
-                    if not response or not response.strip():
-                        await message.channel.send("Hmm, I got an empty response. Try again?")
-                        return
+                    await message.channel.send("Hmm, I'm having trouble thinking right now. Try again?")
+                    return
 
-                # Save to DB
-                self.db.add_conversation(channel_id, user_id, "user", content)
-                self.db.add_conversation(channel_id, user_id, "assistant", response, model_used=use_model)
+            # Save to DB
+            self.db.add_conversation(channel_id, user_id, "user", content)
+            self.db.add_conversation(channel_id, user_id, "assistant", response, model_used=use_model)
 
-                # Track cost
-                cost = self.model_router.estimate_cost(use_model, len(content.split()) * 2, len(response.split()) * 2)
-                self.db.log_generation(channel_id, user_id, "text", use_model, content[:50], cost_pollen=cost)
+            # Track cost
+            cost = self.model_router.estimate_cost(use_model, len(content.split()) * 2, len(response.split()) * 2)
+            self.db.log_generation(channel_id, user_id, "text", use_model, content[:50], cost_pollen=cost)
 
-                # Truncate if needed
-                display_response = response
-                if len(display_response) > 1950:
-                    display_response = display_response[:1950] + "..."
-
-                # Add model info
-                display_response += f"\n\n*Model: {use_model}*"
-
-                await message.channel.send(display_response)
+            # Send response (chunked if needed)
+            chunks = chunk_response(response)
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    await message.channel.send(chunk)
+                else:
+                    await message.channel.send(chunk)
 
         except Exception as e:
             await message.channel.send(f"Error: {str(e)[:200]}")
@@ -214,11 +223,12 @@ def main():
         print("Create a .env file from .env.example and add your bot token.")
         sys.exit(1)
 
-    print("NullVector v2.0 — Starting...")
+    print("NullVector v3.0 — Starting...")
     print(f"  API: Pollinations ({POLLINATIONS_BASE_URL})")
     print(f"  Key: {'set' if POLLINATIONS_KEY else 'not set (using free tier)'}")
     print(f"  Admins: {ADMIN_IDS or 'none'}")
     print(f"  Default text model: openai-fast")
+    print(f"  Bot interaction: {'configured' if os.environ.get('BOT_PARTNER_ID') else 'not set'}")
     print()
 
     bot = NullVectorBot()

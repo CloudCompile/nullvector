@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NullVector v2.0 — AI Chat Cog
+NullVector v3.0 — AI Chat Cog
 
 The core chat functionality. Smart model routing, persistent memory,
 slash commands. Works in DMs and servers.
@@ -17,6 +17,7 @@ from database import Database
 from pollinations import PollinationsAPI
 from model_router import ModelRouter
 from rate_limiter import RateLimiter
+from utils import generate_with_retry, chunk_response, send_chunked
 from config import DEFAULT_TEXT_MODEL, STM_MESSAGES, LTM_SUMMARY_THRESHOLD
 
 
@@ -79,8 +80,12 @@ class AIChatCog(commands.Cog, name="AI Chat"):
         # Smart model routing
         use_model = model or router.route_text(question)
 
-        # Build context from database
-        history = db.get_conversations(channel_id, limit=STM_MESSAGES)
+        # Build context from database — cross-server for DMs
+        is_dm = not interaction.guild
+        if is_dm:
+            history = db.get_conversations_cross_server(user_id, limit=STM_MESSAGES)
+        else:
+            history = db.get_conversations(channel_id, limit=STM_MESSAGES)
         ltm_summary = db.get_latest_ltm_summary(channel_id)
 
         # Build system prompt
@@ -108,14 +113,11 @@ class AIChatCog(commands.Cog, name="AI Chat"):
             cost = router.estimate_cost(use_model, len(question.split()) * 2, len(response.split()) * 2)
             db.log_generation(channel_id, user_id, "text", use_model, question[:50], cost_pollen=cost)
 
-            # Truncate if needed
-            if len(response) > 1950:
-                response = response[:1950] + "..."
-
-            # Add model info
-            response += f"\n\n*Model: {use_model}*"
-
-            await interaction.followup.send(response)
+            # Use chunked response for long text
+            if len(response) > 1900:
+                await send_chunked(interaction.followup, response)
+            else:
+                await interaction.followup.send(response)
 
         except Exception as e:
             await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
@@ -169,12 +171,11 @@ class AIChatCog(commands.Cog, name="AI Chat"):
             cost = router.estimate_cost(use_model, len(message.split()) * 2, len(response.split()) * 2)
             db.log_generation(channel_id, user_id, "text", use_model, message[:50], cost_pollen=cost)
 
-            if len(response) > 1950:
-                response = response[:1950] + "..."
-
-            response += f"\n\n*Model: {use_model}*"
-
-            await interaction.followup.send(response)
+            # Use chunked response for long text
+            if len(response) > 1900:
+                await send_chunked(interaction.followup, response)
+            else:
+                await interaction.followup.send(response)
 
         except Exception as e:
             await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
@@ -213,12 +214,14 @@ class AIChatCog(commands.Cog, name="AI Chat"):
             cost = router.estimate_cost("gemini-search", len(query.split()) * 2, len(response.split()) * 2)
             db.log_generation(channel_id, user_id, "research", "gemini-search", query[:50], cost_pollen=cost)
 
-            if len(response) > 1950:
-                response = response[:1950] + "..."
+            if len(response) > 1900:
+                desc = response[:1900]
+            else:
+                desc = response
 
             embed = discord.Embed(
                 title="Research Results",
-                description=response,
+                description=desc,
                 color=discord.Color.blue(),
             )
             embed.set_footer(text="Model: gemini-search | Powered by Pollinations")
@@ -238,6 +241,7 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
+        router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
         user_id = interaction.user.id
@@ -268,12 +272,62 @@ class AIChatCog(commands.Cog, name="AI Chat"):
             cost = router.estimate_cost("claude-fast", len(prompt.split()) * 2, len(response.split()) * 2)
             db.log_generation(channel_id, user_id, "code", "claude-fast", prompt[:50], cost_pollen=cost)
 
-            if len(response) > 1950:
-                response = response[:1950] + "..."
+            # Use chunked response for long text
+            if len(response) > 1900:
+                await send_chunked(interaction.followup, response)
+            else:
+                await interaction.followup.send(response)
 
-            response += "\n\n*Model: claude-fast*"
+        except Exception as e:
+            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
 
-            await interaction.followup.send(response)
+    @app_commands.command(name="imagine", description="Generate creative text from a prompt")
+    @app_commands.describe(
+        prompt="What to imagine",
+        model="AI model to use (leave empty for smart routing)",
+        temperature="Creativity (0.0-2.0)",
+    )
+    async def imagine(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        model: str = None,
+        temperature: float = None,
+    ):
+        """Creative text generation using AI."""
+        await interaction.response.defer(thinking=True)
+
+        api: PollinationsAPI = self.bot.api  # type: ignore
+        db: Database = self.bot.db  # type: ignore
+        router: ModelRouter = self.bot.model_router  # type: ignore
+        limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
+
+        user_id = interaction.user.id
+        channel_id = interaction.channel_id
+
+        can_gen, reason = limiter.can_generate(user_id)
+        if not can_gen:
+            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            return
+
+        use_model = model or "openai-fast"
+
+        try:
+            response = await api.text_simple(
+                prompt,
+                model=use_model,
+                system="You are a creative writer. Be vivid and imaginative. Write in a casual, engaging style.",
+                temperature=temperature or 0.9,
+            )
+
+            cost = router.estimate_cost(use_model, len(prompt.split()) * 2, len(response.split()) * 2)
+            db.log_generation(channel_id, user_id, "text", use_model, prompt[:50], cost_pollen=cost)
+
+            # Use chunked response for long text
+            if len(response) > 1900:
+                await send_chunked(interaction.followup, response)
+            else:
+                await interaction.followup.send(response)
 
         except Exception as e:
             await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
