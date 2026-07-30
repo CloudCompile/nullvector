@@ -63,12 +63,12 @@ def chunk_response(text: str, max_len: int = MAX_DISCORD_MSG) -> List[str]:
 
 
 async def send_chunked(
-    sendable, text: str, max_len: int = MAX_DISCORD_MSG, **kwargs
+    target, text: str, max_len: int = MAX_DISCORD_MSG, **kwargs
 ) -> List[Any]:
     """Send a potentially long response as multiple messages.
 
     Args:
-        sendable: A discord channel, context, or interaction.followup
+        target: A commands.Context, Webhook, channel, or any object with .send()
         text: The text to send
         max_len: Max characters per message
         **kwargs: Additional kwargs passed to send()
@@ -82,9 +82,9 @@ async def send_chunked(
     for i, chunk in enumerate(chunks):
         try:
             if i == 0:
-                msg = await sendable.send(chunk, **kwargs)
+                msg = await target.send(chunk, **kwargs)
             else:
-                msg = await sendable.send(chunk)
+                msg = await target.send(chunk)
             messages.append(msg)
         except Exception as e:
             log.error(f"Failed to send chunk {i}/{len(chunks)}: {e}")

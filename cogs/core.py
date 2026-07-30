@@ -23,8 +23,8 @@ class CoreCog(commands.Cog, name="Core"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="help", description="Show NullVector's commands")
-    async def help_slash(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="help", description="Show NullVector's commands")
+    async def help_slash(self, ctx: commands.Context):
         """Show all available commands."""
         embed = discord.Embed(
             title="NullVector v3.0 — Command Guide",
@@ -64,19 +64,22 @@ class CoreCog(commands.Cog, name="Core"):
         )
 
         embed.set_footer(text="NullVector v3.0 | Smart Model Routing | Cost-Conscious AI")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
-    @app_commands.command(name="ping", description="Check response time")
-    async def ping(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="ping", description="Check response time")
+    async def ping(self, ctx: commands.Context):
         """Simple ping/pong."""
         latency = round(self.bot.latency * 1000)
-        await interaction.response.send_message(f"Pong! {latency}ms")
+        await ctx.send(f"Pong! {latency}ms")
 
-    @app_commands.command(name="memory", description="View conversation memory stats")
-    async def memory(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="memory", description="View conversation memory stats")
+    async def memory(self, ctx: commands.Context):
         """View memory stats for this channel."""
         db: Database = self.bot.db  # type: ignore
-        channel_id = interaction.channel_id
+        channel_id = ctx.channel.id
 
         count = db.get_conversation_count(channel_id)
         ltm = db.get_latest_ltm_summary(channel_id)
@@ -89,24 +92,27 @@ class CoreCog(commands.Cog, name="Core"):
         if ltm:
             embed.add_field(name="Summary Preview", value=ltm[:200] + "...", inline=False)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
-    @app_commands.command(name="clear", description="Clear conversation memory for this channel")
-    async def clear(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="clear", description="Clear conversation memory for this channel")
+    async def clear(self, ctx: commands.Context):
         """Clear conversation memory."""
         db: Database = self.bot.db  # type: ignore
-        channel_id = interaction.channel_id
+        channel_id = ctx.channel.id
         db.clear_conversations(channel_id)
-        await interaction.response.send_message("Conversation memory cleared!")
+        await ctx.send("Conversation memory cleared!")
 
-    @app_commands.command(name="models", description="List available AI models")
+    @commands.hybrid_command(name="models", description="List available AI models")
     @app_commands.describe(
         category="Model category: text or image",
         tier="Cost tier: budget, standard, premium",
     )
     async def models(
         self,
-        interaction: discord.Interaction,
+        ctx: commands.Context,
         category: str = "text",
         tier: str = None,
     ):
@@ -116,10 +122,15 @@ class CoreCog(commands.Cog, name="Core"):
         models = router.list_models(category=category, cost_tier=tier)
 
         if not models:
-            await interaction.response.send_message(
-                f"No models found for category `{category}`" + (f" tier `{tier}`" if tier else ""),
-                ephemeral=True,
-            )
+            if ctx.interaction:
+                await ctx.send(
+                    f"No models found for category `{category}`" + (f" tier `{tier}`" if tier else ""),
+                    ephemeral=True,
+                )
+            else:
+                await ctx.send(
+                    f"No models found for category `{category}`" + (f" tier `{tier}`" if tier else "")
+                )
             return
 
         embed = discord.Embed(
@@ -138,20 +149,28 @@ class CoreCog(commands.Cog, name="Core"):
                 inline=False,
             )
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
-    @app_commands.command(name="model_info", description="Get details about a specific model")
+    @commands.hybrid_command(name="model_info", description="Get details about a specific model")
     @app_commands.describe(model="Model name to look up")
-    async def model_info(self, interaction: discord.Interaction, model: str):
+    async def model_info(self, ctx: commands.Context, model: str):
         """Get detailed info about a model."""
         router: ModelRouter = self.bot.model_router  # type: ignore
         info = router.get_model_info(model)
 
         if not info:
-            await interaction.response.send_message(
-                f"Model `{model}` not found. Use `/models` to see available models.",
-                ephemeral=True,
-            )
+            if ctx.interaction:
+                await ctx.send(
+                    f"Model `{model}` not found. Use `/models` to see available models.",
+                    ephemeral=True,
+                )
+            else:
+                await ctx.send(
+                    f"Model `{model}` not found. Use `/models` to see available models."
+                )
             return
 
         embed = discord.Embed(
@@ -166,13 +185,16 @@ class CoreCog(commands.Cog, name="Core"):
         embed.add_field(name="Vision", value="✅" if info.has_vision else "❌", inline=True)
         embed.add_field(name="Reasoning", value="✅" if info.has_reasoning else "❌", inline=True)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
-    @app_commands.command(name="quota", description="Check your rate limits")
-    async def quota(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="quota", description="Check your rate limits")
+    async def quota(self, ctx: commands.Context):
         """Check your generation rate limits."""
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
-        status = limiter.get_status(interaction.user.id)
+        status = limiter.get_status(ctx.author.id)
 
         embed = discord.Embed(title="Your Rate Limits", color=discord.Color.purple())
         embed.add_field(
@@ -191,7 +213,10 @@ class CoreCog(commands.Cog, name="Core"):
             inline=True,
         )
         embed.set_footer(text="Rate limits reset automatically")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):

@@ -12,6 +12,7 @@ How it works:
   - A background task periodically checks if they should chat
   - They share a conversation history in the database
   - Cooldowns prevent infinite loops and spam
+  - Admins can manually trigger conversations with /talk_to_lily
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ from typing import Optional
 
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 
-from config import ADMIN_IDS
+from config import ADMIN_IDS, BOT_PARTNER_ID
 from pollinations import PollinationsAPI
 from database import Database
 from model_router import ModelRouter
@@ -56,6 +58,12 @@ class BotInteractionCog(commands.Cog, name="Bot Interaction"):
         if self._partner_id:
             return self._partner_id
 
+        # Check BOT_PARTNER_ID from config first
+        if BOT_PARTNER_ID:
+            self._partner_id = BOT_PARTNER_ID
+            return self._partner_id
+
+        # Fall back to env var / database
         import os
         partner_str = os.environ.get("BOT_PARTNER_ID", "")
         if partner_str and partner_str.isdigit():
@@ -204,6 +212,92 @@ class BotInteractionCog(commands.Cog, name="Bot Interaction"):
         except Exception as e:
             log.error(f"Failed to generate response to partner: {e}")
             return "lol true"
+
+    @commands.hybrid_command(name="talk_to_lily", description="Manually start a conversation with Lily (admin only)")
+    @app_commands.describe(topic="Override the auto-generated topic with a custom message")
+    async def talk_to_lily(self, ctx: commands.Context, topic: str = None):
+        """Manually trigger a conversation with Lily.
+
+        Admin only. NullVector will send a message to Lily in the current channel.
+        If no topic is provided, one will be auto-generated.
+        """
+        # Admin check
+        if ctx.author.id not in ADMIN_IDS:
+            if ctx.interaction:
+                await ctx.send("Admin only.", ephemeral=True)
+            else:
+                await ctx.send("Admin only.")
+            return
+
+        # Check if BOT_PARTNER_ID is configured
+        partner_id = self._get_partner_id()
+        if not partner_id:
+            if ctx.interaction:
+                await ctx.send(
+                    "Lily is not configured. Set `BOT_PARTNER_ID` in your environment or database.",
+                    ephemeral=True,
+                )
+            else:
+                await ctx.send(
+                    "Lily is not configured. Set `BOT_PARTNER_ID` in your environment or database."
+                )
+            return
+
+        # Find a shared guild where both NullVector and Lily are present
+        guild = ctx.guild
+        if not guild:
+            if ctx.interaction:
+                await ctx.send("This command can only be used in a server.", ephemeral=True)
+            else:
+                await ctx.send("This command can only be used in a server.")
+            return
+
+        partner_member = await self._get_partner_in_guild(guild)
+        if not partner_member:
+            if ctx.interaction:
+                await ctx.send(
+                    f"Lily is not in this server ({guild.name}). Find a shared server first.",
+                    ephemeral=True,
+                )
+            else:
+                await ctx.send(
+                    f"Lily is not in this server ({guild.name}). Find a shared server first."
+                )
+            return
+
+        await ctx.defer(thinking=True)
+
+        try:
+            # Generate or use the provided topic
+            if topic:
+                message = topic
+            else:
+                async with ctx.typing():
+                    message = await self._generate_conversation_topic(guild)
+
+            # Send the message in the current channel
+            await ctx.send(message)
+
+            # Log the interaction in the database
+            db: Database = self.bot.db  # type: ignore
+            db.log_bot_interaction(
+                guild.id, ctx.channel.id,
+                "nullvector", partner_id, message
+            )
+
+            # Reset the conversation cooldown so Lily can respond
+            self._last_conversation_time = 0
+            self._active_conversations[ctx.channel.id] = 1
+            self._conversation_cooldowns[ctx.channel.id] = 0
+
+            log.info(f"NullVector manually started a conversation with Lily in {guild.name} (triggered by admin {ctx.author})")
+
+        except Exception as e:
+            log.error(f"Error in talk_to_lily: {e}")
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

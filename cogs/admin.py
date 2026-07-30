@@ -26,11 +26,14 @@ class AdminCog(commands.Cog, name="Admin"):
     def _is_admin(self, user_id: int) -> bool:
         return user_id in ADMIN_IDS
 
-    @app_commands.command(name="stats", description="NullVector health dashboard (admin only)")
-    async def stats(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="stats", description="NullVector health dashboard (admin only)")
+    async def stats(self, ctx: commands.Context):
         """Comprehensive bot health dashboard."""
-        if not self._is_admin(interaction.user.id):
-            await interaction.response.send_message("Admin only.", ephemeral=True)
+        if not self._is_admin(ctx.author.id):
+            if ctx.interaction:
+                await ctx.send("Admin only.", ephemeral=True)
+            else:
+                await ctx.send("Admin only.")
             return
 
         db: Database = self.bot.db  # type: ignore
@@ -100,13 +103,19 @@ class AdminCog(commands.Cog, name="Admin"):
             inline=True,
         )
         embed.set_footer(text="NullVector v3.0 | Smart Model Routing | Retry Logic ✅")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ctx.interaction:
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
 
-    @app_commands.command(name="balance", description="Check API balance (admin only)")
-    async def balance(self, interaction: discord.Interaction):
+    @commands.hybrid_command(name="balance", description="Check API balance (admin only)")
+    async def balance(self, ctx: commands.Context):
         """Check Pollinations API balance."""
-        if not self._is_admin(interaction.user.id):
-            await interaction.response.send_message("Admin only.", ephemeral=True)
+        if not self._is_admin(ctx.author.id):
+            if ctx.interaction:
+                await ctx.send("Admin only.", ephemeral=True)
+            else:
+                await ctx.send("Admin only.")
             return
 
         api = self.bot.api  # type: ignore
@@ -115,9 +124,15 @@ class AdminCog(commands.Cog, name="Admin"):
             embed = discord.Embed(title="API Balance", color=discord.Color.green())
             embed.add_field(name="Balance", value=str(result.get("balance", result.get("total", "N/A"))), inline=True)
             embed.add_field(name="Currency", value=result.get("currency", "pollen"), inline=True)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(embed=embed, ephemeral=True)
+            else:
+                await ctx.send(embed=embed)
         except Exception as e:
-            await interaction.response.send_message(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
 
 async def setup(bot: commands.Bot):

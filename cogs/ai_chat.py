@@ -4,7 +4,7 @@
 NullVector v3.0 — AI Chat Cog
 
 The core chat functionality. Smart model routing, persistent memory,
-slash commands. Works in DMs and servers.
+hybrid commands (slash + prefix). Works in DMs and servers.
 """
 
 from __future__ import annotations
@@ -54,34 +54,37 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
         return system + cleaned
 
-    @app_commands.command(name="ask", description="Ask NullVector anything")
+    @commands.hybrid_command(name="ask", description="Ask NullVector anything")
     @app_commands.describe(
         question="Your question",
         model="AI model (leave empty for smart routing)",
     )
-    async def ask(self, interaction: discord.Interaction, question: str, model: str = None):
+    async def ask(self, ctx: commands.Context, question: str, model: str = None):
         """Ask NullVector a question using AI."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
         router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         # Check rate limit
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         # Smart model routing
         use_model = model or router.route_text(question)
 
         # Build context from database — cross-server for DMs
-        is_dm = not interaction.guild
+        is_dm = not ctx.guild
         if is_dm:
             history = db.get_conversations_cross_server(user_id, limit=STM_MESSAGES)
         else:
@@ -115,33 +118,39 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
             # Use chunked response for long text
             if len(response) > 1900:
-                await send_chunked(interaction.followup, response)
+                await send_chunked(ctx, response)
             else:
-                await interaction.followup.send(response)
+                await ctx.send(response)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
-    @app_commands.command(name="chat", description="Have a conversation with NullVector")
+    @commands.hybrid_command(name="chat", description="Have a conversation with NullVector")
     @app_commands.describe(
         message="Your message",
         model="AI model to use",
     )
-    async def chat(self, interaction: discord.Interaction, message: str, model: str = None):
+    async def chat(self, ctx: commands.Context, message: str, model: str = None):
         """Have a conversation with NullVector using full context."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
         router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         # Route: longer messages get better models
@@ -173,29 +182,36 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
             # Use chunked response for long text
             if len(response) > 1900:
-                await send_chunked(interaction.followup, response)
+                await send_chunked(ctx, response)
             else:
-                await interaction.followup.send(response)
+                await ctx.send(response)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
-    @app_commands.command(name="research", description="Research a topic using web search")
+    @commands.hybrid_command(name="research", description="Research a topic using web search")
     @app_commands.describe(query="What to research")
-    async def research(self, interaction: discord.Interaction, query: str):
+    async def research(self, ctx: commands.Context, query: str):
         """Research a topic using web-search-capable models."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
+        router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         try:
@@ -225,31 +241,37 @@ class AIChatCog(commands.Cog, name="AI Chat"):
                 color=discord.Color.blue(),
             )
             embed.set_footer(text="Model: gemini-search | Powered by Pollinations")
-            await interaction.followup.send(embed=embed)
+            await ctx.send(embed=embed)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
-    @app_commands.command(name="code", description="Get help with coding")
+    @commands.hybrid_command(name="code", description="Get help with coding")
     @app_commands.describe(
         prompt="What you need help with",
         language="Programming language (optional)",
     )
-    async def code(self, interaction: discord.Interaction, prompt: str, language: str = None):
+    async def code(self, ctx: commands.Context, prompt: str, language: str = None):
         """Get coding help from a code-specialized model."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
         router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         system_msg = "You are a coding expert. Provide clear, well-commented code with explanations. Use markdown code blocks."
@@ -274,14 +296,17 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
             # Use chunked response for long text
             if len(response) > 1900:
-                await send_chunked(interaction.followup, response)
+                await send_chunked(ctx, response)
             else:
-                await interaction.followup.send(response)
+                await ctx.send(response)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
-    @app_commands.command(name="imagine", description="Generate creative text from a prompt")
+    @commands.hybrid_command(name="imagine", description="Generate creative text from a prompt")
     @app_commands.describe(
         prompt="What to imagine",
         model="AI model to use (leave empty for smart routing)",
@@ -289,25 +314,28 @@ class AIChatCog(commands.Cog, name="AI Chat"):
     )
     async def imagine(
         self,
-        interaction: discord.Interaction,
+        ctx: commands.Context,
         prompt: str,
         model: str = None,
         temperature: float = None,
     ):
         """Creative text generation using AI."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         api: PollinationsAPI = self.bot.api  # type: ignore
         db: Database = self.bot.db  # type: ignore
         router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         use_model = model or "openai-fast"
@@ -325,12 +353,15 @@ class AIChatCog(commands.Cog, name="AI Chat"):
 
             # Use chunked response for long text
             if len(response) > 1900:
-                await send_chunked(interaction.followup, response)
+                await send_chunked(ctx, response)
             else:
-                await interaction.followup.send(response)
+                await ctx.send(response)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
 
 async def setup(bot: commands.Bot):

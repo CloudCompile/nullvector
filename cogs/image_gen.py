@@ -26,7 +26,7 @@ class ImageGenCog(commands.Cog, name="Image Generation"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="image", description="Generate an image from a prompt")
+    @commands.hybrid_command(name="image", description="Generate an image from a prompt")
     @app_commands.describe(
         prompt="Description of the image",
         model="Image model (sana=cheap, flux=quality, gptimage=pro)",
@@ -35,26 +35,29 @@ class ImageGenCog(commands.Cog, name="Image Generation"):
     )
     async def image(
         self,
-        interaction: discord.Interaction,
+        ctx: commands.Context,
         prompt: str,
         model: str = None,
         width: int = 1024,
         height: int = 1024,
     ):
         """Generate an image from a text prompt."""
-        await interaction.response.defer(thinking=True)
+        await ctx.defer(thinking=True)
 
         db: Database = self.bot.db  # type: ignore
         api: PollinationsAPI = self.bot.api  # type: ignore
         router: ModelRouter = self.bot.model_router  # type: ignore
         limiter: RateLimiter = self.bot.rate_limiter  # type: ignore
 
-        user_id = interaction.user.id
-        channel_id = interaction.channel_id
+        user_id = ctx.author.id
+        channel_id = ctx.channel.id
 
         can_gen, reason = limiter.can_generate(user_id)
         if not can_gen:
-            await interaction.followup.send(f"Slow down! {reason}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Slow down! {reason}", ephemeral=True)
+            else:
+                await ctx.send(f"Slow down! {reason}")
             return
 
         use_model = model or DEFAULT_IMAGE_MODEL
@@ -75,12 +78,15 @@ class ImageGenCog(commands.Cog, name="Image Generation"):
             actual_cost = router.estimate_image_cost(use_model)
             embed.set_footer(text=f"Model: {use_model} | {width}x{height} | Cost: {actual_cost:.4f} pollen")
 
-            await interaction.followup.send(embed=embed, file=file)
+            await ctx.send(embed=embed, file=file)
 
             db.log_generation(channel_id, user_id, "image", use_model, prompt[:50], cost_pollen=actual_cost)
 
         except Exception as e:
-            await interaction.followup.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            if ctx.interaction:
+                await ctx.send(f"Error: {str(e)[:200]}", ephemeral=True)
+            else:
+                await ctx.send(f"Error: {str(e)[:200]}")
 
 
 async def setup(bot: commands.Bot):
